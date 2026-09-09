@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Travel Tracker</title>
+<script src="https://unpkg.com/d3@7"></script>
+<script src="https://unpkg.com/topojson-client@3"></script>
+<style>
+  :root {
+    --bg: #07080d;
+    --bg-elevated: #0d0f18;
+    --panel-bg: rgba(16, 19, 30, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --field-bg: rgba(255, 255, 255, 0.035);
+    --text: #f3f5fb;
+    --text-dim: #8d94ab;
+    --text-faint: #565e75;
+
+    --been-1: #34d399;
+    --been-2: #0ea5a0;
+    --been-solid: #34d399;
+    --want-1: #fb923c;
+    --want-2: #ec4899;
+    --want-solid: #fb923c;
+    --unranked-1: #2a3348;
+    --unranked-2: #171c2b;
+    --unranked-solid: #384463;
+
+    --accent-1: #6366f1;
+    --accent-2: #a855f7;
+    --danger: #fb7185;
+
+    --grad-been: linear-gradient(135deg, var(--been-1), var(--been-2));
+    --grad-want: linear-gradient(135deg, var(--want-1), var(--want-2));
+    --grad-accent: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; position: relative; }
+
+  header {
+    padding: 22px 30px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: rgba(9, 11, 18, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 5;
+    position: relative;
+  }
+  header h1 {
+    font-size: 28px;
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background: var(--grad-accent);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  header .subtitle { color: var(--text-dim); font-size: 14px; margin-top: 4px; letter-spacing: 0.01em; }
+  #backBtn {
+    display: none;
+    background: var(--field-bg);
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 20px;
+    cursor: pointer;
+    margin-right: 20px;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  #backBtn:hover { border-color: var(--accent-1); color: var(--text); background: rgba(99, 102, 241, 0.12); }
+  #backBtn.visible { display: inline-block; }
+
+  .header-right { display: flex; align-items: center; gap: 16px; }
+
+  .view-nav {
+    display: flex;
+    background: var(--field-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 4px;
+    gap: 2px;
+  }
+  .nav-btn {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 14px; font-weight: 600; padding: 9px 18px;
+    border-radius: 18px; cursor: pointer; white-space: nowrap;
+    transition: all 0.15s ease;
+  }
+  .nav-btn:hover:not(.active) { color: var(--text); }
+  .nav-btn.active { background: var(--grad-accent); color: #fff; box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35); }
+
+  .legend { display: flex; gap: 12px; font-size: 14px; color: var(--text-dim); }
+  .legend .swatch {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--field-bg);
+    border: 1px solid var(--panel-border);
+    padding: 8px 16px 8px 12px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .legend .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .legend .dot.been { background: var(--grad-been); box-shadow: 0 0 8px rgba(52, 211, 153, 0.7); }
+  .legend .dot.want { background: var(--grad-want); box-shadow: 0 0 8px rgba(251, 146, 60, 0.7); }
+  .legend .dot.unranked { background: var(--unranked-solid); }
+
+  .backup-controls { display: flex; gap: 8px; }
+  .backup-btn {
+    display: inline-flex; align-items: center;
+    background: var(--field-bg); border: 1px solid var(--panel-border); color: var(--text-dim);
+    font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 20px;
+    cursor: pointer; white-space: nowrap; transition: all 0.15s ease;
+  }
+  .backup-btn:hover { border-color: var(--accent-1); color: var(--text); background: rgba(99, 102, 241, 0.1); }
+
+  main { flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden; }
+
+  #map-container { flex: 1; position: relative; min-width: 0; }
+  #map { width: 100%; height: 100%; display: block; position: relative; z-index: 1; }
+
+  .aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    pointer-events: none;
+    z-index: 0;
+    will-change: transform;
+  }
+  .aurora-1 {
+    width: 480px; height: 480px; top: -120px; left: -80px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.35), transparent 70%);
+    animation: drift1 26s ease-in-out infinite alternate;
+  }
+  .aurora-2 {
+    width: 420px; height: 420px; bottom: -140px; right: 5%;
+    background: radial-gradient(circle, rgba(236, 72, 153, 0.28), transparent 70%);
+    animation: drift2 32s ease-in-out infinite alternate;
+  }
+  .aurora-3 {
+    width: 360px; height: 360px; top: 30%; right: -100px;
+    background: radial-gradient(circle, rgba(52, 211, 153, 0.22), transparent 70%);
+    animation: drift3 22s ease-in-out infinite alternate;
+  }
+  @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(60px, 40px) scale(1.15); } }
+  @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-50px, -30px) scale(1.1); } }
+  @keyframes drift3 { from { transform: translate(0,0) scale(1); } to { transform: translate(-40px, 50px) scale(1.2); } }
+
+  .country {
+    stroke: rgba(5, 6, 10, 0.9);
+    stroke-width: 0.6;
+    cursor: pointer;
+    transition: filter 0.15s ease, opacity 0.15s ease;
+  }
+  .country:hover { filter: brightness(1.3) saturate(1.15); }
+  .country.selected { stroke: #c4b5fd; stroke-width: 1.8; filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.65)); }
+
+  #tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(14, 16, 26, 0.9);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--panel-border);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    display: none;
+    z-index: 10;
+    white-space: nowrap;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  #tooltip .t-name { font-weight: 700; }
+  #tooltip .t-status { color: var(--text-dim); margin-top: 2px; }
+
+  aside#panel {
+    width: 460px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    overflow-y: auto;
+    padding: 28px;
+    position: relative;
+    z-index: 2;
+    box-shadow: -20px 0 60px rgba(0,0,0,0.35);
+  }
+  aside#panel::-webkit-scrollbar { width: 8px; }
+  aside#panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+  #ideasView {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 40px;
+    position: relative;
+    z-index: 2;
+  }
+  #ideasView::-webkit-scrollbar { width: 8px; }
+  #ideasView::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+  .ideas-inner { max-width: 760px; margin: 0 auto; }
+  .ideas-inner h2 { font-size: 26px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .ideas-intro { color: var(--text-dim); font-size: 14.5px; margin-bottom: 28px; }
+
+  .idea-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--panel-border);
+    border-radius: 18px;
+    padding: 24px 26px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .idea-card h3 { font-size: 19px; font-weight: 700; margin: 0 0 10px; padding-right: 34px; }
+  .idea-note { font-size: 14.5px; color: var(--text-dim); line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; }
+  .candidate-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .candidate-list li {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 12px 15px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+  .candidate-list li::before { content: "→ "; color: var(--accent-2); font-weight: 700; }
+
+  .empty-state { color: var(--text-dim); font-size: 15px; line-height: 1.6; margin-top: 40px; text-align: center; }
+
+  .panel-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .panel-header h2 { font-size: 28px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  .status-pill {
+    font-size: 12px; padding: 5px 12px; border-radius: 20px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;
+  }
+  .status-pill.been { background: rgba(52, 211, 153, 0.14); color: var(--been-solid); box-shadow: 0 0 12px rgba(52, 211, 153, 0.25); }
+  .status-pill.want-to-go { background: rgba(251, 146, 60, 0.14); color: var(--want-solid); box-shadow: 0 0 12px rgba(251, 146, 60, 0.25); }
+  .status-pill.unranked { background: rgba(255,255,255,0.06); color: var(--text-dim); }
+
+  section.block { margin-bottom: 28px; }
+  section.block h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin: 0 0 14px; font-weight: 700; }
+
+  .wtg-card {
+    background: linear-gradient(160deg, rgba(251, 146, 60, 0.08), rgba(236, 72, 153, 0.05));
+    border: 1px solid rgba(251, 146, 60, 0.25);
+    border-radius: 16px; padding: 18px; position: relative;
+  }
+  .priority-stars {
+    font-size: 19px; letter-spacing: 3px; margin-bottom: 10px;
+    background: var(--grad-want); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.35));
+  }
+  .wtg-note { font-size: 15px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+
+  .visit-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 12px;
+    position: relative;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .visit-card:hover { border-color: rgba(255,255,255,0.16); background: rgba(255, 255, 255, 0.045); }
+  .visit-card .dates { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text); }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+  .tag {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    background: rgba(255,255,255,0.06); color: var(--text-dim);
+    padding: 5px 11px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);
+  }
+  .visit-notes { font-size: 14px; color: var(--text-dim); line-height: 1.6; white-space: pre-wrap; }
+  .remove-btn {
+    position: absolute; top: 14px; right: 14px;
+    background: none; border: none; color: var(--text-faint);
+    cursor: pointer; font-size: 15px; line-height: 1; padding: 4px 6px; border-radius: 6px;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .remove-btn:hover { color: var(--danger); background: rgba(251, 113, 133, 0.12); }
+
+  form.add-form { display: flex; flex-direction: column; gap: 14px; }
+  form.add-form label { font-size: 12.5px; color: var(--text-faint); display: block; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+  form.add-form input[type=text], form.add-form input[type=month], form.add-form select, form.add-form textarea {
+    width: 100%;
+    background: var(--field-bg);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 11px 13px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  form.add-form input:focus, form.add-form select:focus, form.add-form textarea:focus {
+    outline: none; border-color: var(--accent-1); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+  }
+  form.add-form textarea { resize: vertical; min-height: 68px; }
+  .field-row { display: flex; gap: 10px; }
+  .field-row > div { flex: 1; }
+  .select-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .priority-picker { display: flex; gap: 6px; }
+  .priority-picker button {
+    flex: 1; background: var(--field-bg); border: 1px solid var(--panel-border);
+    color: var(--text-dim); padding: 11px 0; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 600;
+    transition: all 0.15s ease;
+  }
+  .priority-picker button.active { background: var(--grad-want); border-color: transparent; color: #1a0f05; box-shadow: 0 0 14px rgba(251, 146, 60, 0.4); }
+
+  .submit-btn {
+    background: var(--grad-accent); color: #fff; border: none; padding: 14px 16px;
+    border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px;
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .submit-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45); }
+  .submit-btn:active { transform: translateY(0); }
+
+  .toggle-add-btn {
+    background: var(--field-bg); border: 1px solid var(--panel-border); color: var(--text-dim);
+    padding: 13px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; margin-bottom: 12px;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .toggle-add-btn:hover { border-color: var(--accent-1); color: var(--text); background: rgba(99, 102, 241, 0.1); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div style="display:flex; align-items:center;">
+      <button id="backBtn" onclick="enterWorldView()">← World map</button>
+      <div>
+        <h1 id="pageTitle">Travel Tracker</h1>
+        <div class="subtitle" id="pageSubtitle">Been, want to go, and the kind of trip it was (or should be)</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="view-nav">
+        <button class="nav-btn active" id="navMapBtn" onclick="enterWorldView()">Map</button>
+        <button class="nav-btn" id="navIdeasBtn" onclick="enterIdeasView()">💡 Trip Ideas</button>
+      </div>
+      <div class="legend" id="legendRow">
+        <span class="swatch"><span class="dot been"></span>Been</span>
+        <span class="swatch"><span class="dot want"></span>Want to go</span>
+        <span class="swatch"><span class="dot unranked"></span>Unranked</span>
+      </div>
+      <div class="backup-controls">
+        <button class="backup-btn" onclick="exportBackup()" title="Download a backup file of everything">⬇ Backup</button>
+        <label class="backup-btn" title="Restore from a backup file">
+          ⬆ Restore
+          <input type="file" id="restoreInput" accept="application/json" onchange="importBackup(event)" style="display:none;">
+        </label>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="aurora-blob aurora-1"></div>
+    <div class="aurora-blob aurora-2"></div>
+    <div class="aurora-blob aurora-3"></div>
+    <div id="map-container">
+      <svg id="map">
+        <defs>
+          <linearGradient id="gradBeen" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#34d399"/>
+            <stop offset="100%" stop-color="#0ea5a0"/>
+          </linearGradient>
+          <linearGradient id="gradWant" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#fb923c"/>
+            <stop offset="100%" stop-color="#ec4899"/>
+          </linearGradient>
+          <linearGradient id="gradUnranked" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#242c40"/>
+            <stop offset="100%" stop-color="#141827"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div id="tooltip"></div>
+    </div>
+    <aside id="panel"></aside>
+    <div id="ideasView"></div>
+  </main>
+</div>
+
+<script>
+const STORAGE_KEY = "travelTrackerData";
+const STATE_STORAGE_KEY = "travelTrackerStateData";
+const US_NAME = "United States of America";
+
+const ACTIVITY_OPTIONS = ["Hiking", "Beach", "City", "Road Trip", "Nature/Outdoors", "Culture/History", "Food", "Adventure", "Other"];
+const BUDGET_OPTIONS = ["Shoestring", "Mid", "Splurge"];
+const GROUP_OPTIONS = ["Solo", "Couple", "Friends", "Family"];
+const PACE_OPTIONS = ["Relaxed", "Balanced", "Packed/Adventure"];
+
+const SEED_DATA = {
+  "Kyrgyzstan": {
+    status: "want-to-go",
+    visits: [],
+    wantToGo: { priority: 5, note: "Hiking. Sparked this whole project looking at a map — really wanna go so bad." }
+  }
+};
+const SEED_STATE_DATA = {};
+const TRIP_IDEAS_KEY = "travelTrackerTripIdeas";
+const SEED_TRIP_IDEAS = [];
+
+function loadStore(key, seed) {
+  const raw = localStorage.getItem(key);
+  if (raw) {
+    try { return JSON.parse(raw); } catch (e) { console.warn("Bad stored data for " + key + ", using seed.", e); }
+  }
+  return JSON.parse(JSON.stringify(seed));
+}
+function saveData() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+  localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(STATE_DATA));
+  localStorage.setItem(TRIP_IDEAS_KEY, JSON.stringify(TRIP_IDEAS));
+}
+
+let DATA = loadStore(STORAGE_KEY, SEED_DATA);
+let STATE_DATA = loadStore(STATE_STORAGE_KEY, SEED_STATE_DATA);
+let TRIP_IDEAS = loadStore(TRIP_IDEAS_KEY, SEED_TRIP_IDEAS);
+
+let scope = "world"; // 'world' | 'us' | 'ideas'
+let selectedRegion = null;
+let addFormMode = null; // 'visit' | 'wantToGo' | null
+let addingIdea = false;
+
+function currentStore() { return scope === "us" ? STATE_DATA : DATA; }
+
+function regionEntry(name) {
+  const store = currentStore();
+  return store[name] || { status: "unranked", visits: [], wantToGo: null };
+}
+function effectiveStatus(entry) {
+  if (entry.visits && entry.visits.length > 0) return "been";
+  if (entry.wantToGo) return "want-to-go";
+  return "unranked";
+}
+function usAggregateStatus() {
+  const statuses = Object.values(STATE_DATA).map(effectiveStatus);
+  if (statuses.includes("been")) return "been";
+  if (statuses.includes("want-to-go")) return "want-to-go";
+  return "unranked";
+}
+function statusForFeature(name) {
+  if (scope === "world" && name === US_NAME) return usAggregateStatus();
+  return effectiveStatus(regionEntry(name));
+}
+function statusFillHex(status) {
+  if (status === "been") return "url(#gradBeen)";
+  if (status === "want-to-go") return "url(#gradWant)";
+  return "url(#gradUnranked)";
+}
+
+// ---- Map rendering ----
+const svg = d3.select("#map");
+const g = svg.append("g");
+const tooltip = document.getElementById("tooltip");
+
+let projection, path;
+let worldFeatures = null;
+let statesFeatures = null;
+
+function sizeMap() {
+  const container = document.getElementById("map-container");
+  const w = container.clientWidth, h = container.clientHeight;
+  svg.attr("viewBox", `0 0 ${w} ${h}`);
+  const features = scope === "us" ? statesFeatures : worldFeatures;
+  if (!features) return;
+  projection = scope === "us"
+    ? d3.geoAlbersUsa().fitSize([w - 20, h - 20], { type: "FeatureCollection", features })
+    : d3.geoNaturalEarth1().fitSize([w - 20, h - 20], { type: "Sphere" });
+  path = d3.geoPath(projection);
+  g.attr("transform", "translate(10,10)");
+  renderFeatures(features);
+}
+
+d3.json("https://unpkg.com/world-atlas@2.0.2/countries-50m.json").then(topo => {
+  worldFeatures = topojson.feature(topo, topo.objects.countries).features;
+  if (scope === "world") sizeMap();
+}).catch(err => {
+  document.getElementById("map-container").innerHTML =
+    '<div style="padding:40px;color:var(--text-dim);">Could not load map data (offline?). Try again once you have a connection.</div>';
+  console.error(err);
+});
+
+d3.json("https://unpkg.com/us-atlas@3/states-10m.json").then(topo => {
+  statesFeatures = topojson.feature(topo, topo.objects.states).features;
+  if (scope === "us") sizeMap();
+}).catch(err => console.error("Could not load US states data", err));
+
+function regionClicked(name) {
+  if (scope === "world" && name === US_NAME) {
+    enterStatesView();
+  } else {
+    selectRegion(name);
+  }
+}
+
+function renderFeatures(features) {
+  const sel = g.selectAll("path.country").data(features, d => d.properties.name);
+  sel.join(
+    enter => enter.append("path")
+      .attr("class", "country")
+      .attr("d", path)
+      .on("mousemove", onHover)
+      .on("mouseleave", () => tooltip.style.display = "none")
+      .on("click", (evt, d) => regionClicked(d.properties.name)),
+    update => update.attr("d", path),
+    exit => exit.remove()
+  );
+  colorRegions();
+}
+
+function colorRegions() {
+  g.selectAll("path.country")
+    .attr("fill", d => statusFillHex(statusForFeature(d.properties.name)))
+    .classed("selected", d => d.properties.name === selectedRegion);
+}
+
+function onHover(evt, d) {
+  const status = statusForFeature(d.properties.name);
+  const label = status === "been" ? "Been" : status === "want-to-go" ? "Want to go" : "Unranked";
+  tooltip.innerHTML = `<div class="t-name">${d.properties.name}</div><div class="t-status">${label}</div>`;
+  tooltip.style.display = "block";
+  const rect = document.getElementById("map-container").getBoundingClientRect();
+  tooltip.style.left = (evt.clientX - rect.left + 14) + "px";
+  tooltip.style.top = (evt.clientY - rect.top + 14) + "px";
+}
+
+window.addEventListener("resize", sizeMap);
+
+// ---- Scope navigation ----
+function showMapViews() {
+  document.getElementById("map-container").style.display = "";
+  document.getElementById("panel").style.display = "";
+  document.getElementById("ideasView").style.display = "none";
+  document.getElementById("legendRow").style.display = "";
+  document.getElementById("navMapBtn").classList.add("active");
+  document.getElementById("navIdeasBtn").classList.remove("active");
+}
+function enterStatesView() {
+  scope = "us";
+  selectedRegion = null;
+  addFormMode = null;
+  showMapViews();
+  document.getElementById("backBtn").classList.add("visible");
+  document.getElementById("pageTitle").textContent = "United States";
+  document.getElementById("pageSubtitle").textContent = "Click a state to see or add trips";
+  sizeMap();
+  renderPanel();
+}
+function enterWorldView() {
+  scope = "world";
+  selectedRegion = null;
+  addFormMode = null;
+  showMapViews();
+  document.getElementById("backBtn").classList.remove("visible");
+  document.getElementById("pageTitle").textContent = "Travel Tracker";
+  document.getElementById("pageSubtitle").textContent = "Been, want to go, and the kind of trip it was (or should be)";
+  sizeMap();
+  renderPanel();
+}
+function enterIdeasView() {
+  scope = "ideas";
+  addingIdea = false;
+  document.getElementById("backBtn").classList.remove("visible");
+  document.getElementById("map-container").style.display = "none";
+  document.getElementById("panel").style.display = "none";
+  document.getElementById("ideasView").style.display = "block";
+  document.getElementById("legendRow").style.display = "none";
+  document.getElementById("navMapBtn").classList.remove("active");
+  document.getElementById("navIdeasBtn").classList.add("active");
+  document.getElementById("pageTitle").textContent = "Trip Ideas";
+  document.getElementById("pageSubtitle").textContent = "Places worth planning toward — not on the map yet";
+  renderIdeas();
+}
+
+// ---- Selection / panel ----
+function selectRegion(name) {
+  selectedRegion = name;
+  addFormMode = null;
+  colorRegions();
+  renderPanel();
+}
+
+function renderPanel() {
+  const panel = document.getElementById("panel");
+  if (!selectedRegion) {
+    panel.innerHTML = scope === "us"
+      ? `<div class="empty-state">Click a state to see or add trips.</div>`
+      : `<div class="empty-state">Click a country on the map to see or add trips.</div>`;
+    return;
+  }
+  const entry = regionEntry(selectedRegion);
+  const status = effectiveStatus(entry);
+  const statusLabel = status === "been" ? "Been" : status === "want-to-go" ? "Want to go" : "Unranked";
+
+  let html = `
+    <div class="panel-header">
+      <h2>${selectedRegion}</h2>
+      <span class="status-pill ${status}">${statusLabel}</span>
+    </div>
+  `;
+
+  if (entry.wantToGo) {
+    html += `
+      <section class="block">
+        <h3>Want to go</h3>
+        <div class="wtg-card">
+          <div class="priority-stars">${"★".repeat(entry.wantToGo.priority)}${"☆".repeat(5 - entry.wantToGo.priority)}</div>
+          ${entry.wantToGo.note ? `<div class="wtg-note">${escapeHtml(entry.wantToGo.note)}</div>` : ""}
+          <button class="remove-btn" title="Remove want-to-go" onclick="removeWantToGo('${escapeAttr(selectedRegion)}')">✕</button>
+        </div>
+      </section>
+    `;
+  }
+
+  if (entry.visits && entry.visits.length > 0) {
+    html += `<section class="block"><h3>Visits (${entry.visits.length})</h3>`;
+    entry.visits.slice().reverse().forEach(v => {
+      const idx = entry.visits.indexOf(v);
+      html += `
+        <div class="visit-card">
+          <button class="remove-btn" title="Remove visit" onclick="removeVisit('${escapeAttr(selectedRegion)}', ${idx})">✕</button>
+          <div class="dates">${escapeHtml(v.dateRange || "Undated")}</div>
+          <div class="tag-row">
+            ${v.activityType ? `<span class="tag">${escapeHtml(v.activityType)}</span>` : ""}
+            ${v.budgetLevel ? `<span class="tag">${escapeHtml(v.budgetLevel)}</span>` : ""}
+            ${v.groupType ? `<span class="tag">${escapeHtml(v.groupType)}</span>` : ""}
+            ${v.pace ? `<span class="tag">${escapeHtml(v.pace)}</span>` : ""}
+          </div>
+          ${v.notes ? `<div class="visit-notes">${escapeHtml(v.notes)}</div>` : ""}
+        </div>
+      `;
+    });
+    html += `</section>`;
+  }
+
+  html += `<section class="block">`;
+  if (addFormMode === "visit") {
+    html += renderVisitForm();
+  } else if (addFormMode === "wantToGo") {
+    html += renderWantToGoForm(entry.wantToGo);
+  } else {
+    html += `<button class="toggle-add-btn" onclick="setAddMode('visit')">+ Log a visit</button>`;
+    if (!entry.wantToGo) {
+      html += `<button class="toggle-add-btn" onclick="setAddMode('wantToGo')">+ Add to want-to-go</button>`;
+    }
+  }
+  html += `</section>`;
+
+  panel.innerHTML = html;
+}
+
+function renderVisitForm() {
+  const opts = (arr) => arr.map(o => `<option value="${o}">${o}</option>`).join("");
+  return `
+    <form class="add-form" onsubmit="submitVisit(event)">
+      <div>
+        <label>Dates</label>
+        <input type="text" name="dateRange" placeholder="e.g. Mar 2024 or Summer 2023">
+      </div>
+      <div class="select-grid">
+        <div>
+          <label>Activity type</label>
+          <select name="activityType"><option value="">—</option>${opts(ACTIVITY_OPTIONS)}</select>
+        </div>
+        <div>
+          <label>Budget</label>
+          <select name="budgetLevel"><option value="">—</option>${opts(BUDGET_OPTIONS)}</select>
+        </div>
+        <div>
+          <label>Group</label>
+          <select name="groupType"><option value="">—</option>${opts(GROUP_OPTIONS)}</select>
+        </div>
+        <div>
+          <label>Pace</label>
+          <select name="pace"><option value="">—</option>${opts(PACE_OPTIONS)}</select>
+        </div>
+      </div>
+      <div>
+        <label>Notes</label>
+        <textarea name="notes" placeholder="Anything worth remembering about this trip"></textarea>
+      </div>
+      <button type="submit" class="submit-btn">Save visit</button>
+      <button type="button" class="toggle-add-btn" onclick="setAddMode(null)">Cancel</button>
+    </form>
+  `;
+}
+
+function renderWantToGoForm(existing) {
+  const priority = existing ? existing.priority : 3;
+  const note = existing ? existing.note : "";
+  return `
+    <form class="add-form" onsubmit="submitWantToGo(event)">
+      <div>
+        <label>Priority</label>
+        <div class="priority-picker">
+          ${[1,2,3,4,5].map(n => `<button type="button" class="${n === priority ? 'active' : ''}" data-priority="${n}" onclick="pickPriority(this)">${n}</button>`).join("")}
+        </div>
+      </div>
+      <div>
+        <label>Why / notes</label>
+        <textarea name="note" placeholder="What's drawing you there">${escapeHtml(note)}</textarea>
+      </div>
+      <input type="hidden" name="priority" value="${priority}">
+      <button type="submit" class="submit-btn">Save</button>
+      <button type="button" class="toggle-add-btn" onclick="setAddMode(null)">Cancel</button>
+    </form>
+  `;
+}
+
+function pickPriority(btn) {
+  const form = btn.closest("form");
+  form.querySelectorAll(".priority-picker button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  form.querySelector('input[name="priority"]').value = btn.dataset.priority;
+}
+
+function setAddMode(mode) {
+  addFormMode = mode;
+  renderPanel();
+}
+
+function submitVisit(evt) {
+  evt.preventDefault();
+  const f = evt.target;
+  const visit = {
+    dateRange: f.dateRange.value.trim(),
+    activityType: f.activityType.value,
+    budgetLevel: f.budgetLevel.value,
+    groupType: f.groupType.value,
+    pace: f.pace.value,
+    notes: f.notes.value.trim()
+  };
+  const store = currentStore();
+  if (!store[selectedRegion]) store[selectedRegion] = { status: "unranked", visits: [], wantToGo: null };
+  store[selectedRegion].visits.push(visit);
+  addFormMode = null;
+  saveData();
+  colorRegions();
+  renderPanel();
+}
+
+function submitWantToGo(evt) {
+  evt.preventDefault();
+  const f = evt.target;
+  const store = currentStore();
+  if (!store[selectedRegion]) store[selectedRegion] = { status: "unranked", visits: [], wantToGo: null };
+  store[selectedRegion].wantToGo = {
+    priority: parseInt(f.priority.value, 10),
+    note: f.note.value.trim()
+  };
+  addFormMode = null;
+  saveData();
+  colorRegions();
+  renderPanel();
+}
+
+function removeVisit(name, idx) {
+  const store = currentStore();
+  if (!store[name]) return;
+  store[name].visits.splice(idx, 1);
+  saveData();
+  colorRegions();
+  renderPanel();
+}
+
+function removeWantToGo(name) {
+  const store = currentStore();
+  if (!store[name]) return;
+  store[name].wantToGo = null;
+  saveData();
+  colorRegions();
+  renderPanel();
+}
+
+function escapeHtml(str) {
+  return (str || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function escapeAttr(str) { return escapeHtml(str).replace(/'/g, "&#39;"); }
+
+// ---- Trip ideas ----
+function renderIdeas() {
+  const view = document.getElementById("ideasView");
+  let html = `<div class="ideas-inner">`;
+  html += `<h2>Trip Ideas</h2>`;
+  html += `<div class="ideas-intro">Not tied to one country or state yet — a shortlist of candidates for a trip concept you're still deciding on.</div>`;
+
+  if (TRIP_IDEAS.length === 0 && !addingIdea) {
+    html += `<div class="empty-state">No trip ideas saved yet.</div>`;
+  }
+
+  TRIP_IDEAS.slice().reverse().forEach(idea => {
+    html += `
+      <div class="idea-card">
+        <button class="remove-btn" title="Remove idea" onclick="removeTripIdea('${escapeAttr(idea.id)}')">✕</button>
+        <h3>${escapeHtml(idea.title)}</h3>
+        ${idea.note ? `<div class="idea-note">${escapeHtml(idea.note)}</div>` : ""}
+        ${idea.candidates && idea.candidates.length ? `
+          <ul class="candidate-list">
+            ${idea.candidates.map(c => `<li>${escapeHtml(c)}</li>`).join("")}
+          </ul>
+        ` : ""}
+      </div>
+    `;
+  });
+
+  if (addingIdea) {
+    html += renderIdeaForm();
+  } else {
+    html += `<button class="toggle-add-btn" onclick="setAddingIdea(true)">+ Add a trip idea</button>`;
+  }
+
+  html += `</div>`;
+  view.innerHTML = html;
+}
+
+function renderIdeaForm() {
+  return `
+    <form class="add-form idea-card" onsubmit="submitTripIdea(event)" style="margin-top:4px;">
+      <div>
+        <label>Title</label>
+        <input type="text" name="title" placeholder="e.g. Weekend hiking trip near school" required>
+      </div>
+      <div>
+        <label>Notes</label>
+        <textarea name="note" placeholder="Context, constraints, timing — whatever's true about this idea"></textarea>
+      </div>
+      <div>
+        <label>Candidate destinations (one per line)</label>
+        <textarea name="candidates" placeholder="Name — why it's an option" style="min-height:110px;"></textarea>
+      </div>
+      <button type="submit" class="submit-btn">Save idea</button>
+      <button type="button" class="toggle-add-btn" onclick="setAddingIdea(false)">Cancel</button>
+    </form>
+  `;
+}
+
+function setAddingIdea(val) {
+  addingIdea = val;
+  renderIdeas();
+}
+
+function submitTripIdea(evt) {
+  evt.preventDefault();
+  const f = evt.target;
+  const candidates = f.candidates.value.split("\n").map(s => s.trim()).filter(Boolean);
+  TRIP_IDEAS.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    title: f.title.value.trim(),
+    note: f.note.value.trim(),
+    candidates
+  });
+  addingIdea = false;
+  saveData();
+  renderIdeas();
+}
+
+function removeTripIdea(id) {
+  TRIP_IDEAS = TRIP_IDEAS.filter(i => i.id !== id);
+  saveData();
+  renderIdeas();
+}
+
+// ---- Backup / restore ----
+function exportBackup() {
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    data: DATA,
+    stateData: STATE_DATA,
+    tripIdeas: TRIP_IDEAS
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `travel-tracker-backup-${backup.exportedAt.slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function importBackup(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (parsed.data) DATA = parsed.data;
+      if (parsed.stateData) STATE_DATA = parsed.stateData;
+      if (parsed.tripIdeas) TRIP_IDEAS = parsed.tripIdeas;
+      saveData();
+      alert("Restored from backup.");
+      location.reload();
+    } catch (e) {
+      alert("Couldn't read that file — make sure it's a Travel Tracker backup JSON.");
+    }
+  };
+  reader.readAsText(file);
+  evt.target.value = "";
+}
+
+renderPanel();
+</script>
+</body>
+</html>
